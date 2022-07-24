@@ -3,6 +3,31 @@ use chrono::Duration;
 use serde::Deserialize;
 use serde_json;
 use std::cmp::Ordering;
+use std::ops;
+use std::ops::Add;
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct TaskSettings {
+    //represents the seconds of the interval in wich this task should be repeated
+    repeat_interval: Option<u32>,
+    //represents the times this task should be repeated
+    retries: Option<i32>,
+}
+
+impl ops::Sub<i32> for TaskSettings {
+    type Output = TaskSettings;
+
+    fn sub(self, _rhs: i32) -> TaskSettings {
+        let mut output = TaskSettings {
+            repeat_interval: self.repeat_interval,
+            retries: None,
+        };
+        if self.retries.is_some() {
+            output.retries = Some(self.retries.unwrap() - 1);
+        }
+        output
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Task {
@@ -11,36 +36,28 @@ pub struct Task {
     pub weight: Option<usize>,
     pub eta: Option<String>,
     pub payload: Option<String>,
+    pub settings: Option<TaskSettings>,
 }
 
-pub trait _Task {
-    fn from_str(string: &str) -> Task;
-    fn get_queue(&self) -> usize;
-    fn get_weight(&self) -> f64;
-    fn should_run_now(&self) -> bool;
-}
-
-impl _Task for Task {
+impl Task {
     //parse a raw task to a task structure
-    fn from_str(raw_str: &str) -> Self {
+    pub fn from_str(raw_str: &str) -> Self {
         serde_json::from_str(raw_str).unwrap()
     }
 
-    fn get_queue(&self) -> usize {
+    pub fn get_queue(&self) -> usize {
         self.queue
     }
 
-    fn get_weight(&self) -> f64 {
+    pub fn get_weight(&self) -> f64 {
         self.weight.unwrap_or(0) as f64
     }
 
-    fn should_run_now(&self) -> bool {
+    pub fn should_run_now(&self) -> bool {
         match &self.eta {
             Some(eta) => {
                 let now = Utc::now();
-                let eta = Utc
-                    .datetime_from_str(eta.as_str(), "%Y-%m-%d %H:%M:%S")
-                    .unwrap();
+                let eta = get_eta(Some(eta.clone()));
                 if eta < now {
                     return now - eta < Duration::seconds(3);
                 }
@@ -49,6 +66,57 @@ impl _Task for Task {
             None => (),
         };
         true
+    }
+
+    pub fn should_reschedule(&self) -> bool {
+        //no settings we do nothing
+        if self.settings.is_none() {
+            return false;
+        }
+
+        let settings = self.settings.as_ref().unwrap();
+        let repeat_interval = settings.repeat_interval.unwrap_or(0);
+        //no repeat interval, we do nothing
+        if repeat_interval == 0 {
+            return false;
+        }
+
+        //if retries is 0 we finished our work
+        let retries = settings.retries.unwrap_or(-1);
+        if retries == -1 || retries > 0 {
+            return true;
+        }
+        false
+    }
+
+    pub fn get_next(&self) -> Task {
+        Task {
+            eta: self.get_next_eta(),
+            queue: self.queue.clone(),
+            weight: self.weight.clone(),
+            id: self.id.clone(),
+            payload: self.payload.clone(),
+            settings: Some(self.settings.clone().unwrap() - 1),
+        }
+    }
+
+    fn get_next_eta(&self) -> Option<String> {
+        if self.eta.is_none() {
+            return None;
+        }
+        let eta = get_eta(self.eta.clone());
+        //todo refactor this
+        Some(
+            eta.add(Duration::seconds(
+                self.settings
+                    .as_ref()
+                    .unwrap()
+                    .repeat_interval
+                    .unwrap()
+                    .into(),
+            ))
+            .to_string(),
+        )
     }
 }
 
@@ -71,8 +139,7 @@ impl std::cmp::PartialOrd for Task {
 
 fn get_eta(eta: Option<String>) -> DateTime<Utc> {
     return if eta.is_some() {
-        Utc.datetime_from_str(eta.unwrap().as_str(), "%Y-%m-%d %H:%M:%S")
-            .unwrap()
+        eta.unwrap().parse::<DateTime<Utc>>().unwrap()
     } else {
         Utc::now()
     };

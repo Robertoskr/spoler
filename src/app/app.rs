@@ -9,12 +9,13 @@ use tokio::net::TcpStream;
 
 pub mod queue;
 mod task;
+mod task_manager;
 mod worker;
 
 pub use queue::Heap;
 use queue::Queue;
 pub use task::Task;
-pub use task::_Task;
+use task_manager::TaskManager;
 
 type AppQueue<T> = Arc<Mutex<T>>;
 
@@ -45,6 +46,7 @@ where
         let (read, _) = socket.split();
         let mut reader = BufReader::new(read);
         let mut buffer = String::new();
+        let task_manager = TaskManager::new();
 
         loop {
             tokio::select! {
@@ -78,7 +80,9 @@ where
                         //what we can do now, is sending back the task to execute now via the tcp client,
                         //so the client knows that that task needs to be executed in that moment
                         //this is a TODO
-                        println!("{:?}", tasks_to_run_now);
+                        for t in tasks_to_run_now {
+                            task_manager.process(t);
+                        }
                     }
                 }
             };
@@ -91,17 +95,24 @@ where
         let mut result: Vec<Task> = Vec::new();
         for i in 0..self.queues.len() {
             let mut should_run = false;
+            let mut should_reschedule = false;
             //do this inside a block so the lock is released, and other can use it
             {
                 let queue_lock = &self.queues[i].lock().unwrap();
                 let task = queue_lock.peek();
                 if task.is_some() && task.unwrap().should_run_now() {
                     should_run = true;
+                    should_reschedule = task.unwrap().should_reschedule();
                 }
             }
             if should_run {
                 //this is ok, because should pop is true
-                let task = self.queues[i].lock().unwrap().pop().unwrap();
+                let mut queue_lock = self.queues[i].lock().unwrap();
+                let task = queue_lock.pop().unwrap();
+
+                if should_reschedule {
+                    queue_lock.insert(task.get_next());
+                }
 
                 //add this task to the result, should be run now
                 result.push(task);
