@@ -3,16 +3,15 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
 
 pub mod queue;
 mod task;
 mod worker;
 
-pub use queue::BasicQueue;
+pub use queue::Heap;
 use queue::Queue;
 pub use task::Task;
 pub use task::_Task;
@@ -25,7 +24,7 @@ pub struct App<T> {
 
 impl<T> App<T>
 where
-    T: Queue<Task>,
+    T: Queue<Task> + std::fmt::Debug,
 {
     pub fn new() -> Self {
         Self { queues: Vec::new() }
@@ -33,10 +32,6 @@ where
 
     //adds a new queue to the set of queues, and returns the position that it ocuppies in the list of queues
     //this can be used while declaring tasks, etc...
-    pub fn add_queue(&mut self, queue: T) -> usize {
-        self.queues.push(Arc::new(Mutex::new(queue)));
-        self.queues.len() - 1
-    }
 
     pub fn add_new_empty_queue(&mut self) -> () {
         self.queues.push(Arc::new(Mutex::new(T::new())))
@@ -46,15 +41,11 @@ where
         println!("Acepted and running incoming connection: {}", connection.1);
 
         //create the reader that will be reading from the socket
-        let (mut socket, addr) = connection;
+        let (mut socket, _) = connection;
         let (read, _) = socket.split();
         let mut reader = BufReader::new(read);
         let mut buffer = String::new();
 
-        //create a channel and send the channel to the worker
-        let (tx, mut rx): (Sender<String>, Receiver<String>) = mpsc::channel(32);
-
-        let tx1 = tx.clone();
         loop {
             tokio::select! {
                 bytes_read = reader.read_line(&mut buffer) => {
@@ -62,7 +53,7 @@ where
                     if bytes_read == 0 {
                         return;
                     }
-                    let raw_task = str::from_utf8(&buffer.as_bytes())
+                    let raw_task = std::str::from_utf8(&buffer.as_bytes())
                         .expect("Invalid data type")
                         .trim();
 
@@ -74,14 +65,20 @@ where
                     let queue_idx = task.get_queue();
                     self.queues[queue_idx].lock().unwrap().insert(task);
 
+                    //debug
+                    //println!("{:?}", self.queues[queue_idx].lock().unwrap());
+
                     //clean the buffer for the next message
                     buffer.clear();
                 }
-                tasks_to_run_now: Vec<Task> = self.poll_queues() => {
-                    if tasks_to_run_now > 0 {
+                tasks_to_run_now = self.poll_queues() => {
+                    if tasks_to_run_now.len() > 0 {
                         //send this tasks to the proper worker,
                         //each worker has a queue of tasks to execute in that moment
+                        //what we can do now, is sending back the task to execute now via the tcp client,
+                        //so the client knows that that task needs to be executed in that moment
                         //this is a TODO
+                        println!("{:?}", tasks_to_run_now);
                     }
                 }
             };
