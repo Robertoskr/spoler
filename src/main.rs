@@ -1,9 +1,7 @@
 mod app;
 mod worker;
 
-use app::App;
-use app::Heap;
-use app::Task;
+use app::{ApiTaskSettings, App, Heap, Task, TaskType};
 use std::env;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::channel;

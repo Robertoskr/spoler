@@ -14,30 +14,39 @@ pub struct TaskSettings {
     retries: Option<i32>,
 }
 
-impl ops::Sub<i32> for TaskSettings {
-    type Output = TaskSettings;
-
-    fn sub(self, _rhs: i32) -> TaskSettings {
-        let mut output = TaskSettings {
-            repeat_interval: self.repeat_interval,
-            retries: None,
-        };
-        if self.retries.is_some() {
-            output.retries = Some(self.retries.unwrap() - 1);
-        }
-        output
-    }
+//this determines how the task is going to be resolved
+#[derive(Debug, Deserialize, Clone)]
+pub enum TaskType {
+    //the task is resolved via api
+    Api = 1,
+    //the task is resolved sending a tcp message
+    Tcp = 2,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Task {
+    //in wich queue this is going to be in
     pub queue: usize,
     pub id: String,
-    pub weight: Option<usize>,
     //example: 2022-07-25T13:30:9.15Z
     pub eta: Option<String>,
+    //the payload that we are going when processing this task
+    pub task_type: TaskType,
     pub payload: Option<String>,
+    //the specific settings is a string in json format,
+    //and need to have one format or other format depending of the type of task
+    pub specific_settings: String,
+    //general settings of the task
     pub settings: Option<TaskSettings>,
+}
+
+//if the task type is Api, then this is the structure of the settings
+#[derive(Deserialize)]
+pub struct ApiTaskSettings {
+    pub headers: String,
+    pub content_type: String,
+    pub method: String,
+    pub url: String,
 }
 
 impl Task {
@@ -48,10 +57,6 @@ impl Task {
 
     pub fn get_queue(&self) -> usize {
         self.queue
-    }
-
-    pub fn get_weight(&self) -> f64 {
-        self.weight.unwrap_or(0) as f64
     }
 
     pub fn should_run_now(&self) -> bool {
@@ -94,9 +99,10 @@ impl Task {
         Task {
             eta: self.get_next_eta(),
             queue: self.queue.clone(),
-            weight: self.weight.clone(),
             id: self.id.clone(),
             payload: self.payload.clone(),
+            task_type: self.task_type.clone(),
+            specific_settings: self.specific_settings.clone(),
             settings: Some(self.settings.clone().unwrap() - 1),
         }
     }
@@ -144,4 +150,19 @@ fn get_eta(eta: Option<String>) -> DateTime<Utc> {
     } else {
         Utc::now()
     };
+}
+
+impl ops::Sub<i32> for TaskSettings {
+    type Output = TaskSettings;
+
+    fn sub(self, _rhs: i32) -> TaskSettings {
+        let mut output = TaskSettings {
+            repeat_interval: self.repeat_interval,
+            retries: None,
+        };
+        if self.retries.is_some() {
+            output.retries = Some(self.retries.unwrap() - 1);
+        }
+        output
+    }
 }

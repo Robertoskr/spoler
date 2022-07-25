@@ -1,7 +1,7 @@
+use crate::ApiTaskSettings;
 use crate::Task;
+use crate::TaskType;
 use tokio::sync::mpsc::Receiver;
-
-struct QueueDescriptor {}
 
 pub trait Worker {
     fn new() -> Self;
@@ -25,10 +25,35 @@ impl SyncWorker {
                 Some(task) => {
                     println!("Worker: got task: {:?}", task);
 
-                    //now process the task, the task should know how to process it self
+                    //now process the task, the task should have enought information for knowing how it needs to be processed
                     //and the worker should follow that guidelines;
+                    self.process_task(task);
                 }
                 None => (),
+            }
+        }
+    }
+
+    //to do, do this asynchronously ?
+    fn process_task(&self, task: Task) -> () {
+        match task.task_type {
+            // this means that the task needs to be send to some api
+            // the api is located in the specific settings
+            // and send to that api the provided payload
+            TaskType::Api => {
+                let ApiTaskSettings {
+                    headers,
+                    method,
+                    content_type,
+                    url,
+                } = serde_json::from_str(task.specific_settings.as_str()).unwrap();
+                // we have all the data, now, we need to make the request
+                // use reqwest as a library for that .
+            }
+            // this means that the task needs to be send to some tcp address
+            // all the info is located in the specific settings
+            TaskType::Tcp => {
+                //TODO implement this.
             }
         }
     }

@@ -12,13 +12,11 @@ use tokio::sync::Mutex;
 
 pub mod queue;
 mod task;
-mod task_manager;
 mod worker;
 
 pub use queue::Heap;
 use queue::Queue;
-pub use task::Task;
-use task_manager::TaskManager;
+pub use task::{ApiTaskSettings, Task, TaskType};
 
 type AppQueue<T> = Arc<Mutex<T>>;
 

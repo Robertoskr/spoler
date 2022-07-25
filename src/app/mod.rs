@@ -1,5 +1,3 @@
 mod app;
 
-pub use app::App;
-pub use app::Heap;
-pub use app::Task;
+pub use app::{ApiTaskSettings, App, Heap, Task, TaskType};
