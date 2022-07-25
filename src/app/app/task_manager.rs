@@ -11,6 +11,7 @@ impl TaskManager {
         //process the task now,
         //process is collecting some stats, and sending the task to the correct task Pool
         //do all the process in an async way since this is blocking other jobs
+        println!("{:?}", t);
         ()
     }
 }

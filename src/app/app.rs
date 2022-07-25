@@ -1,11 +1,14 @@
 use std::clone::Clone;
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::Mutex;
 
 pub mod queue;
 mod task;
@@ -21,14 +24,18 @@ type AppQueue<T> = Arc<Mutex<T>>;
 
 pub struct App<T> {
     pub queues: Vec<AppQueue<T>>,
+    pub sender: Sender<Task>,
 }
 
 impl<T> App<T>
 where
     T: Queue<Task> + std::fmt::Debug,
 {
-    pub fn new() -> Self {
-        Self { queues: Vec::new() }
+    pub fn new(s: Sender<Task>) -> Self {
+        Self {
+            queues: Vec::new(),
+            sender: s,
+        }
     }
 
     //adds a new queue to the set of queues, and returns the position that it ocuppies in the list of queues
@@ -46,10 +53,19 @@ where
         let (read, _) = socket.split();
         let mut reader = BufReader::new(read);
         let mut buffer = String::new();
-        let task_manager = TaskManager::new();
 
         loop {
             tokio::select! {
+                tasks = self.poll_queues() => {
+                    //send this tasks to the proper worker,
+                    //each worker has a queue of tasks to execute in that moment
+                    //what we can do now, is sending back the task to execute now via the tcp client,
+                    //so the client knows that that task needs to be executed in that moment
+                    //this is a TODO
+                    for t in tasks {
+                        let _ = self.sender.send(t).await;
+                    }
+                }
                 bytes_read = reader.read_line(&mut buffer) => {
                     let bytes_read = bytes_read.unwrap();
                     if bytes_read == 0 {
@@ -65,25 +81,13 @@ where
 
                     //get the lock of the queue, and insert the new task
                     let queue_idx = task.get_queue();
-                    self.queues[queue_idx].lock().unwrap().insert(task);
+                    self.queues[queue_idx].lock().await.insert(task);
 
                     //debug
                     //println!("{:?}", self.queues[queue_idx].lock().unwrap());
 
                     //clean the buffer for the next message
                     buffer.clear();
-                }
-                tasks_to_run_now = self.poll_queues() => {
-                    if tasks_to_run_now.len() > 0 {
-                        //send this tasks to the proper worker,
-                        //each worker has a queue of tasks to execute in that moment
-                        //what we can do now, is sending back the task to execute now via the tcp client,
-                        //so the client knows that that task needs to be executed in that moment
-                        //this is a TODO
-                        for t in tasks_to_run_now {
-                            task_manager.process(t);
-                        }
-                    }
                 }
             };
         }
@@ -98,7 +102,7 @@ where
             let mut should_reschedule = false;
             //do this inside a block so the lock is released, and other can use it
             {
-                let queue_lock = &self.queues[i].lock().unwrap();
+                let queue_lock = &self.queues[i].lock().await;
                 let task = queue_lock.peek();
                 if task.is_some() && task.unwrap().should_run_now() {
                     should_run = true;
@@ -107,7 +111,7 @@ where
             }
             if should_run {
                 //this is ok, because should pop is true
-                let mut queue_lock = self.queues[i].lock().unwrap();
+                let mut queue_lock = self.queues[i].lock().await;
                 let task = queue_lock.pop().unwrap();
 
                 if should_reschedule {
@@ -128,6 +132,9 @@ impl<T> Clone for App<T> {
         for q in &self.queues {
             queues.push(Arc::clone(q));
         }
-        Self { queues: queues }
+        Self {
+            queues: queues,
+            sender: self.sender.clone(),
+        }
     }
 }

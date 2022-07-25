@@ -34,6 +34,7 @@ pub struct Task {
     pub queue: usize,
     pub id: String,
     pub weight: Option<usize>,
+    //example: 2022-07-25T13:30:9.15Z
     pub eta: Option<String>,
     pub payload: Option<String>,
     pub settings: Option<TaskSettings>,
