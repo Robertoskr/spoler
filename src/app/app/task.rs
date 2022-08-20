@@ -9,9 +9,13 @@ use std::ops::Add;
 #[derive(Debug, Deserialize, Clone)]
 pub struct TaskSettings {
     //represents the seconds of the interval in wich this task should be repeated
-    repeat_interval: Option<u32>,
+    pub repeat_interval: Option<u32>,
     //represents the times this task should be repeated
-    retries: Option<i32>,
+    pub retries: Option<i32>,
+    pub url: Option<String>,
+    pub headers: Option<String>,
+    pub method: Option<String>,
+    pub function_path: Option<String>,
 }
 
 //this determines how the task is going to be resolved
@@ -21,6 +25,10 @@ pub enum TaskType {
     Api = 1,
     //the task is resolved sending a tcp message
     Tcp = 2,
+    //the task is resolved via a python function 
+    Python = 3,
+    //we don't know more yet... (WIP)
+    Other = 4,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,25 +36,14 @@ pub struct Task {
     //in wich queue this is going to be in
     pub queue: usize,
     pub id: String,
-    //example: 2022-07-25T13:30:9.15Z
+    //example: 2022-07-30T09:44:9.15Z
     pub eta: Option<String>,
+    pub task_type: i32,
     //the payload that we are going when processing this task
-    pub task_type: TaskType,
     pub payload: Option<String>,
     //the specific settings is a string in json format,
     //and need to have one format or other format depending of the type of task
-    pub specific_settings: String,
-    //general settings of the task
     pub settings: Option<TaskSettings>,
-}
-
-//if the task type is Api, then this is the structure of the settings
-#[derive(Deserialize)]
-pub struct ApiTaskSettings {
-    pub headers: String,
-    pub content_type: String,
-    pub method: String,
-    pub url: String,
 }
 
 impl Task {
@@ -65,7 +62,7 @@ impl Task {
                 let now = Utc::now();
                 let eta = get_eta(Some(eta.clone()));
                 if eta < now {
-                    return now - eta < Duration::seconds(3);
+                    return true;
                 }
                 return eta - now < Duration::seconds(3);
             }
@@ -102,7 +99,6 @@ impl Task {
             id: self.id.clone(),
             payload: self.payload.clone(),
             task_type: self.task_type.clone(),
-            specific_settings: self.specific_settings.clone(),
             settings: Some(self.settings.clone().unwrap() - 1),
         }
     }
@@ -159,6 +155,10 @@ impl ops::Sub<i32> for TaskSettings {
         let mut output = TaskSettings {
             repeat_interval: self.repeat_interval,
             retries: None,
+            url: self.url,
+            method: self.method,
+            headers: self.headers,
+            function_path: self.function_path,
         };
         if self.retries.is_some() {
             output.retries = Some(self.retries.unwrap() - 1);

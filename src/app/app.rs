@@ -16,7 +16,7 @@ mod worker;
 
 pub use queue::Heap;
 use queue::Queue;
-pub use task::{ApiTaskSettings, Task, TaskType};
+pub use task::{Task, TaskSettings, TaskType};
 
 type AppQueue<T> = Arc<Mutex<T>>;
 
@@ -93,7 +93,7 @@ where
 
     pub async fn poll_queues(&mut self) -> Vec<Task> {
         //sleep for some time, for now burning the thread
-        tokio::time::sleep(Duration::from_nanos(100)).await;
+        tokio::time::sleep(Duration::from_nanos(200)).await;
         let mut result: Vec<Task> = Vec::new();
         for i in 0..self.queues.len() {
             let mut should_run = false;

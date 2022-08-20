@@ -1,13 +1,15 @@
 mod app;
+mod utils;
 mod worker;
 
-use app::{ApiTaskSettings, App, Heap, Task, TaskType};
+use app::{App, Heap, Task, TaskType};
+use std::collections::HashMap;
 use std::env;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::channel;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
-use worker::SyncWorker;
+use worker::AsyncWorker;
 
 #[tokio::main]
 async fn main() {
@@ -15,21 +17,24 @@ async fn main() {
     let listener = TcpListener::bind("localhost:8080").await.unwrap();
     println!("Listening to port 8080");
 
-    let (sender, mut receiver): (Sender<Task>, Receiver<Task>) = channel(10);
+    //get the application settings
+    let app_settings: HashMap<String, String> = utils::get_app_settings(args);
+
+    let (sender, receiver): (Sender<Task>, Receiver<Task>) = channel(10);
 
     //create the application
     let mut main_app: App<Heap<Task>> = App::new(sender);
 
-    let n_queues: usize = args[1].parse().unwrap();
+    let n_queues: usize =
+        utils::get_usize_from_settings(&app_settings, "--queues".to_string(), "1".to_string());
 
-    for i in 0..n_queues {
+    for _ in 0..n_queues {
         main_app.add_new_empty_queue();
     }
 
     //create the worker, and start the worker in a different thread;
-    let mut worker = SyncWorker::new(receiver);
     tokio::spawn(async move {
-        worker.run().await;
+        AsyncWorker {}.run(receiver, app_settings.clone()).await;
     });
     //start a new instance of the app (with same queues) for processing all the clients connections
     loop {
