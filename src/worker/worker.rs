@@ -1,6 +1,5 @@
 use crate::utils;
 use crate::Task;
-use crate::TaskType;
 use pyo3::prelude::*;
 use reqwest::header::HeaderMap;
 use reqwest::Method;
@@ -15,46 +14,71 @@ pub trait Worker {
 pub struct AsyncWorker {}
 
 impl AsyncWorker {
-    //start a worker to start running the tasks of the queue descriptor
-    pub async fn run(
-        self,
-        mut receiver: Receiver<Task>,
-        app_settings: HashMap<String, String>,
-    ) -> () {
-        let is_python_app =
-            utils::get_string_from_settings(&app_settings, "--app".to_string(), "".to_string())
-                == "python".to_string();
+    // Entrypoint for the worker processes
+    pub fn run(self, receiver: Receiver<Task>, app_settings: HashMap<String, String>) -> () {
+        //is this application a python app ?
+        let app =
+            utils::get_string_from_settings(&app_settings, "--app".to_string(), "".to_string());
 
-        //if we are using a python app, we should start the python project app class
-        if is_python_app {
-            self._run_python(receiver, &app_settings).await;
+        match app.as_str() {
+            "python" => {
+                Self::_run_python(receiver, &app_settings);
+            }
+            _ => {
+                tokio::spawn(async move {
+                    self._run(receiver, &app_settings).await;
+                });
+            }
         }
-        self._run(receiver, &app_settings).await;
     }
 
-    //run the worker used for python apps
-    async fn _run_python(receiver: Receiver<Task>, &app_settings: HashMap<String, String>) -> () {
-        Python::with_gil(|python| {
-            loop {
-                let message = receiver.recv().await;
-                match message {
-                    Some(task) => {
-                        println!("Worker: got incoming task");
+    /// Starts the worker process for python applications
+    fn _run_python(mut receiver: Receiver<Task>, app_settings: &HashMap<String, String>) -> () {
+        eprintln!("Starting execution of python application worker");
+        pyo3::prepare_freethreaded_python();
+        let python_guard = Python::acquire_gil();
+        let python = python_guard.python();
+        //get the main app
+        let python_project_path = utils::get_string_from_settings(
+            app_settings,
+            "--project-path".to_string(),
+            "".to_string(),
+        );
+        let code = utils::get_code_from_file(python_project_path.clone());
 
-                        //now process the task, the task should have enought information for knowing how it needs to be processed
-                        //and the worker should follow that guidelines;
-                        tokio::task::spawn(async move {
-                            AsyncWorker::process_task(task).await;
-                        });
-                    }
-                    None => (),
+        let main_app =
+            PyModule::from_code(python, code.as_str(), &python_project_path, "SpoolerApp")
+                .unwrap()
+                .getattr("SpoolerApp")
+                .unwrap();
+
+        //prepare all the things of the app
+        //this will call the __init__ function of the python main app
+        //if youare building the app, you should prepare your application there
+        //like connection to db, etc...
+        let main_app = main_app
+            .call0()
+            .expect("Error initializing the python application");
+
+        loop {
+            let message = receiver.try_recv();
+            match message {
+                Err(_) => continue,
+                Ok(task) => {
+                    eprintln!("Python Worker: got incoming task");
+
+                    //since we have only one python thread, we are going to run each task in sync way,
+                    //TODO: handle edge cases, and don't fail on error
+                    let python_fn_name = task.settings.unwrap().executor_ref.unwrap();
+                    main_app.call_method0(&python_fn_name).expect("");
                 }
             }
-        });
+        }
+        //close the python application needed hooks
     }
 
     //run a normal app (requests, tcp tasks)
-    async fn _run(self, mut receiver: Receiver<Task>, app_settings: HashMap<String, String>) -> () {
+    async fn _run(self, mut receiver: Receiver<Task>, _: &HashMap<String, String>) -> () {
         loop {
             let message = receiver.recv().await;
             match message {
@@ -64,30 +88,12 @@ impl AsyncWorker {
                     //now process the task, the task should have enought information for knowing how it needs to be processed
                     //and the worker should follow that guidelines;
                     tokio::task::spawn(async move {
-                        AsyncWorker::process_task(task).await;
+                        let _ = AsyncWorker::process_task(task).await;
                     });
                 }
                 None => (),
             }
         }
-    }
-
-    fn get_main_python_app(app_settings: &HashMap<String, String>, python: &Python) -> &PyAny {
-        let python_project_path = utils::get_string_from_settings(
-            app_settings,
-            "--project-path".to_string(),
-            "".to_string(),
-        );
-
-        if python_project_path.len() == 0 {
-            return;
-        }
-
-        python
-            .import(python_project_path.as_str())
-            .unwrap()
-            .getattr("SpoolerApp")
-            .unwrap()
     }
 
     //to do, do this asynchronously ?
@@ -102,10 +108,6 @@ impl AsyncWorker {
             /*TaskType::Other */
             _ => Ok(()),
         }
-    }
-
-    async fn process_python_task(task: Task) -> Result<(), String> {
-        Ok(())
     }
 
     //Process a request task

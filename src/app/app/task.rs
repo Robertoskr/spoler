@@ -15,7 +15,8 @@ pub struct TaskSettings {
     pub url: Option<String>,
     pub headers: Option<String>,
     pub method: Option<String>,
-    pub function_path: Option<String>,
+    //used in python applications
+    pub executor_ref: Option<String>,
 }
 
 //this determines how the task is going to be resolved
@@ -25,7 +26,7 @@ pub enum TaskType {
     Api = 1,
     //the task is resolved sending a tcp message
     Tcp = 2,
-    //the task is resolved via a python function 
+    //the task is resolved via a python function
     Python = 3,
     //we don't know more yet... (WIP)
     Other = 4,
@@ -158,7 +159,7 @@ impl ops::Sub<i32> for TaskSettings {
             url: self.url,
             method: self.method,
             headers: self.headers,
-            function_path: self.function_path,
+            executor_ref: self.executor_ref,
         };
         if self.retries.is_some() {
             output.retries = Some(self.retries.unwrap() - 1);

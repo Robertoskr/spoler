@@ -1,21 +1,21 @@
-use std::{collections::HashMap, fmt::Debug, str::FromStr};
+use std::{collections::HashMap, fs};
 pub fn get_app_settings(args: Vec<String>) -> HashMap<String, String> {
     let mut settings = HashMap::new();
     let mut found = false;
     for i in 0..args.len() {
         if args[i].starts_with("--") {
-            if found {
-                found = false;
-                continue;
-            } else {
-                found = true;
-            }
+            found = true;
         } else if found {
             settings.insert(args[i - 1].clone(), args[i].clone());
+            found = false;
         }
     }
 
     settings
+}
+
+pub fn get_code_from_file(path: String) -> String {
+    fs::read_to_string(path).unwrap()
 }
 
 pub fn get_i64_from_settings(settings: &HashMap<String, String>, key: &String) -> i64 {
